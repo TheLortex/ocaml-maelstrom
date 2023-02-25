@@ -62,3 +62,6 @@ val read_raw : t -> Message.t
 val read : t -> string * MessageBody.t res
 val write_raw : t -> Message.t -> unit
 val write : t -> string -> MessageBody.t res -> unit
+
+val respond_with :
+  t -> (string -> MessageBody.t -> MessageBody.t res * 'a) -> 'a

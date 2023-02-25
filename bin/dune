@@ -1,3 +1,4 @@
 (executable
- (public_name challenge)
- (name main))
+ (public_name echo)
+ (name echo)
+ (libraries maelstrom eio_main))

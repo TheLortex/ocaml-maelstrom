@@ -1,3 +1,5 @@
+let or_fail = function Ok v -> v | Error s -> invalid_arg s
+
 module ErrorBody = struct
   type kind =
     | Timeout
@@ -32,7 +34,7 @@ module ErrorBody = struct
 
   type t = { in_reply_to : int; kind : kind; text : string } [@@deriving yojson]
 
-  let of_json t = of_yojson t |> Result.get_ok
+  let of_json t = of_yojson t |> or_fail
   let in_reply_to t = t.in_reply_to
   let kind t = t.kind
   let text t = t.text
@@ -49,6 +51,7 @@ module MessageBody = struct
     payload : assoc;
   }
 
+  let reply msg response = { response with in_reply_to = msg.msg_id }
   let to_int_option ~label = Option.map (fun v -> (label, `Int v))
   let ( **? ) a b = match a with None -> b | Some a -> a :: b
 
@@ -78,8 +81,12 @@ module MessageBody = struct
           invalid_arg (Fmt.str "Use of reserved payload member %s" k))
       payload
 
+  let counter = ref 0
+
   let make ?msg_id ?in_reply_to ~type' payload =
     check_assoc payload;
+    incr counter;
+    let msg_id = match msg_id with None -> Some !counter | v -> v in
     { msg_id; in_reply_to; type'; payload = (payload :> assoc) }
 
   let type' t = t.type'
@@ -94,7 +101,7 @@ end
 module Init = struct
   type t = { node_id : string; node_ids : string list } [@@deriving yojson]
 
-  let of_json t = of_yojson t |> Result.get_ok
+  let of_json t = of_yojson t |> or_fail
 end
 
 type t = {
@@ -107,10 +114,11 @@ module Message = struct
   type init = t
 
   type t = { src : string; dest : string; body : Yojson.Safe.t }
-  [@@deriving yojson]
+  [@@deriving yojson { strict = false }]
 
-  let of_json t = of_yojson t |> Result.get_ok
+  let of_json t = of_yojson t |> or_fail
   let to_json = to_yojson
+  let make_raw ~init dest body = { src = init.Init.node_id; dest; body }
   let make ~ms dest body = { src = ms.init.node_id; dest; body }
   let body t = t.body
   let dest t = t.dest
@@ -133,6 +141,43 @@ let ms_of_json j =
   if type' = "error" then Error (ErrorBody.of_json j)
   else Ok (MessageBody.of_json j)
 
+let read_raw ~stdin =
+  let packet = stdin () |> Option.get in
+  Eio.traceln "%s"
+    (Yojson.Safe.pretty_to_string packet
+    |> String.split_on_char '\n'
+    |> List.map (fun s -> "<< " ^ s)
+    |> String.concat "\n");
+  Message.of_json packet
+
+let read ~stdin =
+  let msg = read_raw ~stdin in
+  (Message.src msg, ms_of_json (Message.body msg))
+
+let write_raw ~stdout msg =
+  let json = Message.to_json msg in
+  let msg = Yojson.Safe.to_string json in
+  Eio.traceln "%s"
+    (Yojson.Safe.pretty_to_string json
+    |> String.split_on_char '\n'
+    |> List.map (fun s -> ">> " ^ s)
+    |> String.concat "\n");
+  Eio.Flow.copy_string (msg ^ "\n") stdout
+
+let write ~stdout ~init dest body =
+  let json = ms_to_json body in
+  let message = Message.make_raw ~init dest json in
+  write_raw ~stdout message
+
+let respond_with ~stdin ~stdout fn =
+  let raw = read_raw ~stdin in
+  let src, message = (Message.src raw, ms_of_json (Message.body raw)) in
+  let response, ret = fn src (Result.get_ok message) in
+  let json = ms_to_json response in
+  let message = Message.{ src = raw.dest; dest = raw.src; body = json } in
+  write_raw ~stdout message;
+  ret
+
 let with_init ~stdin ~stdout fn =
   let lexbuf =
     Lexing.from_function ~with_positions:false (fun bytes n ->
@@ -146,26 +191,21 @@ let with_init ~stdin ~stdout fn =
   let stdin =
     Yojson.Safe.seq_from_lexbuf lexer_state lexbuf |> Seq.to_dispenser
   in
-  let packet = stdin () |> Option.get in
   let init =
-    Message.of_json packet |> Message.body |> MessageBody.of_json
-    |> MessageBody.payload |> Init.of_json
+    respond_with ~stdin ~stdout @@ fun _ message ->
+    ( Ok
+        (MessageBody.reply message
+           (MessageBody.make ~type':"init_ok" (`Assoc []))),
+      message |> MessageBody.payload |> Init.of_json )
   in
   fn { stdin; stdout = (stdout :> Eio.Flow.sink); init }
 
-let read_raw v =
-  let packet = v.stdin () |> Option.get in
-  Message.of_json packet
+let read_raw v = read_raw ~stdin:v.stdin
 
 let read v =
   let msg = read_raw v in
   (Message.src msg, ms_of_json (Message.body msg))
 
-let write_raw t msg =
-  let json = Message.to_json msg in
-  Eio.Flow.copy_string (Yojson.Safe.to_string json) t.stdout
-
-let write t dest body =
-  let json = ms_to_json body in
-  let message = Message.make ~ms:t dest json in
-  write_raw t message
+let write_raw v = write_raw ~stdout:v.stdout
+let write v = write ~stdout:v.stdout ~init:v.init
+let respond_with v = respond_with ~stdout:v.stdout ~stdin:v.stdin
