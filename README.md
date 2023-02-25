@@ -12,4 +12,4 @@ with OCaml programs.
 In this repo I provide `maelstrom`, a library that facilitates the communication
 with Maelstrom by implementing the JSON-based protocol and providing some helpers.
 
-In `bin/` my solutions to the challenge (currently 3/6 done). 
+In `bin/` my solutions to the challenge (currently 1, 2, 3a, 3b). 
