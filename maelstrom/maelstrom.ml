@@ -201,19 +201,56 @@ let respond_with ~stdin ~stdout fn =
   write_raw ~stdout message;
   ret
 
-let with_init ~stdin ~stdout fn =
+let handle_incoming_message ~state (src, message) =
+  match message with
+  (* Errors occur as a response to a request, so we look for the callback *)
+  | Error v -> (
+      match Hashtbl.find_opt state.callbacks (ErrorBodyWire.in_reply_to v) with
+      | None -> Eio.traceln "WARNING: uncaught error response"
+      | Some cb -> cb (Error (ErrorBodyWire.to_body v)))
+  (* Ok can happen either as a request or as a response *)
+  | Ok res -> (
+      let in_reply_to = MessageBodyWire.msg_id res in
+      match Hashtbl.find_opt state.handlers (MessageBodyWire.type' res) with
+      | Some cb ->
+          (* There's a request handler for the message *)
+          let response = cb (MessageBodyWire.to_body res) in
+          let response =
+            match response with
+            | Ok v -> Ok (MessageBodyWire.make ?in_reply_to v)
+            | Error v ->
+                Error
+                  (ErrorBodyWire.make ~in_reply_to:(Option.get in_reply_to) v)
+          in
+          let json = ms_to_json response in
+          let message =
+            { Message.src = state.init.node_id; dest = src; body = json }
+          in
+          write_raw ~stdout:state.stdout message
+      | None -> (
+          (* No request handler, we check if a callback was setup *)
+          match
+            Hashtbl.find_opt state.callbacks
+              (MessageBodyWire.in_reply_to res |> Option.value ~default:(-1))
+          with
+          | None -> Eio.traceln "WARNING: unhandled message"
+          | Some cb -> cb (Ok (MessageBodyWire.to_body res))))
+
+let flow_to_json_seq ~stdin =
   let lexbuf =
     Lexing.from_function ~with_positions:false (fun bytes n ->
-        Eio.traceln "read %d" n;
         let c = Cstruct.create_unsafe n in
         let l = Eio.Flow.single_read stdin c in
         Cstruct.blit_to_bytes c 0 bytes 0 l;
         l)
   in
   let lexer_state = Yojson.Safe.init_lexer () in
-  let stdin =
-    Yojson.Safe.seq_from_lexbuf lexer_state lexbuf |> Seq.to_dispenser
-  in
+  Yojson.Safe.seq_from_lexbuf lexer_state lexbuf |> Seq.to_dispenser
+
+let with_init ~stdin ~stdout fn =
+  (* setup stdin *)
+  let stdin = flow_to_json_seq ~stdin in
+  (* initial handshake *)
   let init =
     respond_with ~stdin ~stdout @@ fun _ message ->
     ( Ok
@@ -222,6 +259,7 @@ let with_init ~stdin ~stdout fn =
            (MessageBody.make ~type':"init_ok" [])),
       message |> MessageBodyWire.payload |> Init.of_payload )
   in
+  (* setup state *)
   let state =
     {
       stdout = (stdout :> Eio.Flow.sink);
@@ -231,46 +269,12 @@ let with_init ~stdin ~stdout fn =
       stop_cond = Eio.Condition.create ();
     }
   in
+  (* background job to dispatch messages *)
   Eio.Fiber.first
     (fun () -> fn state)
     (fun () ->
       while true do
-        let src, message = read ~stdin in
-        match message with
-        | Error v -> (
-            match
-              Hashtbl.find_opt state.callbacks (ErrorBodyWire.in_reply_to v)
-            with
-            | None -> Eio.traceln "WARNING: uncaught error response"
-            | Some cb -> cb (Error (ErrorBodyWire.to_body v)))
-        | Ok res -> (
-            let in_reply_to = MessageBodyWire.msg_id res in
-            match
-              Hashtbl.find_opt state.handlers (MessageBodyWire.type' res)
-            with
-            | Some cb ->
-                let response = cb (MessageBodyWire.to_body res) in
-                let response =
-                  match response with
-                  | Ok v -> Ok (MessageBodyWire.make ?in_reply_to v)
-                  | Error v ->
-                      Error
-                        (ErrorBodyWire.make
-                           ~in_reply_to:(Option.get in_reply_to) v)
-                in
-                let json = ms_to_json response in
-                let message =
-                  { Message.src = init.node_id; dest = src; body = json }
-                in
-                write_raw ~stdout message
-            | None -> (
-                match
-                  Hashtbl.find_opt state.callbacks
-                    (MessageBodyWire.in_reply_to res
-                    |> Option.value ~default:(-1))
-                with
-                | None -> Eio.traceln "WARNING: unhandled message"
-                | Some cb -> cb (Ok (MessageBodyWire.to_body res))))
+        handle_incoming_message ~state (read ~stdin)
       done;
       failwith "unreachable")
 
