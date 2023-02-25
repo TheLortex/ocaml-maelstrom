@@ -7,11 +7,12 @@ module IntSet = Set.Make (Int)
 let messages = ref IntSet.empty
 let ack str = Ok (MessageBody.make ~type':str [])
 
-let broadcast_handler ~clock ~ms msg =
+let broadcast_handler ~sw ~clock ~ms msg =
   let open Yojson.Safe.Util in
   let message =
     `Assoc (MessageBody.payload msg) |> member "message" |> to_int
   in
+
   if not (IntSet.mem message !messages) then (
     messages := IntSet.add message !messages;
     let gossip =
@@ -21,6 +22,7 @@ let broadcast_handler ~clock ~ms msg =
       | Ok _ -> acked := true
       | Error s -> Eio.traceln "error: %s" (ErrorBody.text s)
     in
+    Eio.Fiber.fork ~sw @@ fun () ->
     Eio.Fiber.List.iter
       (fun node ->
         let acked = ref false in
@@ -63,6 +65,7 @@ let () =
   let clock = env#clock in
   with_init ~stdout:env#stdout ~stdin:env#stdin @@ fun ms ->
   Eio.traceln "init!";
-  with_handler ms "broadcast" (broadcast_handler ~clock ~ms) @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  with_handler ms "broadcast" (broadcast_handler ~sw ~clock ~ms) @@ fun () ->
   with_handler ms "read" read_handler @@ fun () ->
   with_handler ms "topology" (topology_handler ~ms) @@ fun () -> wait_eof ms
