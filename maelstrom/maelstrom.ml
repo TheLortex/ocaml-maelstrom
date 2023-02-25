@@ -97,7 +97,11 @@ module Init = struct
   let of_json t = of_yojson t |> Result.get_ok
 end
 
-type t = { stdin : unit -> Yojson.Safe.t option; init : Init.t }
+type t = {
+  stdin : unit -> Yojson.Safe.t option;
+  stdout : Eio.Flow.sink;
+  init : Init.t;
+}
 
 module Message = struct
   type init = t
@@ -129,14 +133,25 @@ let ms_of_json j =
   if type' = "error" then Error (ErrorBody.of_json j)
   else Ok (MessageBody.of_json j)
 
-let init () =
-  let stdin = Yojson.Safe.seq_from_channel stdin |> Seq.to_dispenser in
+let with_init ~stdin ~stdout fn =
+  let lexbuf =
+    Lexing.from_function ~with_positions:false (fun bytes n ->
+        Eio.traceln "read %d" n;
+        let c = Cstruct.create_unsafe n in
+        let l = Eio.Flow.single_read stdin c in
+        Cstruct.blit_to_bytes c 0 bytes 0 l;
+        l)
+  in
+  let lexer_state = Yojson.Safe.init_lexer () in
+  let stdin =
+    Yojson.Safe.seq_from_lexbuf lexer_state lexbuf |> Seq.to_dispenser
+  in
   let packet = stdin () |> Option.get in
   let init =
     Message.of_json packet |> Message.body |> MessageBody.of_json
     |> MessageBody.payload |> Init.of_json
   in
-  { stdin; init }
+  fn { stdin; stdout = (stdout :> Eio.Flow.sink); init }
 
 let read_raw v =
   let packet = v.stdin () |> Option.get in
@@ -146,11 +161,11 @@ let read v =
   let msg = read_raw v in
   (Message.src msg, ms_of_json (Message.body msg))
 
-let write_raw msg =
+let write_raw t msg =
   let json = Message.to_json msg in
-  Yojson.Safe.to_channel stdout json
+  Eio.Flow.copy_string (Yojson.Safe.to_string json) t.stdout
 
 let write t dest body =
   let json = ms_to_json body in
   let message = Message.make ~ms:t dest json in
-  write_raw message
+  write_raw t message

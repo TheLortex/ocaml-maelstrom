@@ -54,8 +54,11 @@ type 'a res = ('a, error) Result.t
 
 val ms_to_json : MessageBody.t res -> Yojson.Safe.t
 val ms_of_json : Yojson.Safe.t -> MessageBody.t res
-val init : unit -> t
+
+val with_init :
+  stdin:#Eio.Flow.source -> stdout:#Eio.Flow.sink -> (t -> 'a) -> 'a
+
 val read_raw : t -> Message.t
 val read : t -> string * MessageBody.t res
-val write_raw : Message.t -> unit
+val write_raw : t -> Message.t -> unit
 val write : t -> string -> MessageBody.t res -> unit
