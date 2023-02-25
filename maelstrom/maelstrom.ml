@@ -51,7 +51,6 @@ module MessageBody = struct
     payload : assoc;
   }
 
-  let reply msg response = { response with in_reply_to = msg.msg_id }
   let to_int_option ~label = Option.map (fun v -> (label, `Int v))
   let ( **? ) a b = match a with None -> b | Some a -> a :: b
 
@@ -89,6 +88,7 @@ module MessageBody = struct
     let msg_id = match msg_id with None -> Some !counter | v -> v in
     { msg_id; in_reply_to; type'; payload = (payload :> assoc) }
 
+  let reply msg ~type' payload = make ?in_reply_to:msg.msg_id ~type' payload
   let type' t = t.type'
   let msg_id t = t.msg_id
   let in_reply_to t = t.in_reply_to
@@ -193,9 +193,7 @@ let with_init ~stdin ~stdout fn =
   in
   let init =
     respond_with ~stdin ~stdout @@ fun _ message ->
-    ( Ok
-        (MessageBody.reply message
-           (MessageBody.make ~type':"init_ok" (`Assoc []))),
+    ( Ok (MessageBody.reply message ~type':"init_ok" (`Assoc [])),
       message |> MessageBody.payload |> Init.of_json )
   in
   fn { stdin; stdout = (stdout :> Eio.Flow.sink); init }
@@ -209,3 +207,7 @@ let read v =
 let write_raw v = write_raw ~stdout:v.stdout
 let write v = write ~stdout:v.stdout ~init:v.init
 let respond_with v = respond_with ~stdout:v.stdout ~stdin:v.stdin
+
+let node_id t = t.init.node_id
+
+let node_ids t = t.init.node_ids

@@ -35,6 +35,9 @@ module MessageBody : sig
   val msg_id : t -> int option
   val in_reply_to : t -> int option
   val payload : t -> [> `Assoc of (string * Yojson.Safe.t) list ]
+
+  val reply :
+    t -> type':string -> [< `Assoc of (string * Yojson.Safe.t) list ] -> t
 end
 
 type t
@@ -65,3 +68,6 @@ val write : t -> string -> MessageBody.t res -> unit
 
 val respond_with :
   t -> (string -> MessageBody.t -> MessageBody.t res * 'a) -> 'a
+
+val node_id : t -> string
+val node_ids : t -> string list

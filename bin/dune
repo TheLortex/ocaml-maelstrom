@@ -1,4 +1,3 @@
-(executable
- (public_name echo)
- (name echo)
+(executables
+ (public_names echo unique_id)
  (libraries maelstrom eio_main))
