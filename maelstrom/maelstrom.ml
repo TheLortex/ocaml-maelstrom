@@ -53,13 +53,13 @@ module ErrorBodyWire = struct
 end
 
 module MessageBody = struct
-  type assoc = [ `Assoc of (string * Yojson.Safe.t) list ]
-  type t = { type' : string; payload : assoc }
+  type payload = (string * Yojson.Safe.t) list
+  type t = { type' : string; payload : payload }
 
   let is_field_allowed (k, _) =
     match k with "type" | "msg_id" | "in_reply_to" -> false | _ -> true
 
-  let check_assoc (`Assoc payload) =
+  let check_assoc payload =
     List.iter
       (fun (k, v) ->
         if not (is_field_allowed (k, v)) then
@@ -68,13 +68,10 @@ module MessageBody = struct
 
   let make ~type' payload =
     check_assoc payload;
-    { type'; payload = (payload :> assoc) }
+    { type'; payload }
 
   let type' t = t.type'
-
-  let payload t =
-    let (`Assoc p) = t.payload in
-    `Assoc p
+  let payload t = t.payload
 end
 
 module MessageBodyWire = struct
@@ -84,14 +81,14 @@ module MessageBodyWire = struct
     type' : string;
     msg_id : int option;
     in_reply_to : int option;
-    payload : assoc;
+    payload : payload;
   }
 
   let to_int_option ~label = Option.map (fun v -> (label, `Int v))
   let ( **? ) a b = match a with None -> b | Some a -> a :: b
 
   let to_json t =
-    let (`Assoc assoc) = t.payload in
+    let assoc = t.payload in
     `Assoc
       (("type", `String t.type')
       :: to_int_option ~label:"msg_id" t.msg_id
@@ -104,35 +101,26 @@ module MessageBodyWire = struct
     let msg_id = member "msg_id" json |> to_int_option in
     let in_reply_to = member "in_reply_to" json |> to_int_option in
     let payload = to_assoc json |> List.filter is_field_allowed in
-    { type'; msg_id; in_reply_to; payload = `Assoc payload }
+    { type'; msg_id; in_reply_to; payload }
 
   let counter = ref 0
 
   let make ?in_reply_to v =
     incr counter;
     let msg_id = Some !counter in
-    {
-      msg_id;
-      in_reply_to;
-      type' = v.MessageBody.type';
-      payload = (v.payload :> assoc);
-    }
+    { msg_id; in_reply_to; type' = v.MessageBody.type'; payload = v.payload }
 
   let type' t = t.type'
   let msg_id t = t.msg_id
   let in_reply_to t = t.in_reply_to
-
-  let payload t =
-    let (`Assoc p) = t.payload in
-    `Assoc p
-
+  let payload t = t.payload
   let to_body t = { MessageBody.payload = t.payload; type' = t.type' }
 end
 
 module Init = struct
   type t = { node_id : string; node_ids : string list } [@@deriving yojson]
 
-  let of_json t = of_yojson t |> or_fail
+  let of_payload t = of_yojson (`Assoc t) |> or_fail
 end
 
 type error = ErrorBody.t
@@ -231,8 +219,8 @@ let with_init ~stdin ~stdout fn =
     ( Ok
         (MessageBodyWire.make
            ?in_reply_to:(MessageBodyWire.msg_id message)
-           (MessageBody.make ~type':"init_ok" (`Assoc []))),
-      message |> MessageBodyWire.payload |> Init.of_json )
+           (MessageBody.make ~type':"init_ok" [])),
+      message |> MessageBodyWire.payload |> Init.of_payload )
   in
   let state =
     {

@@ -1,26 +1,19 @@
 (lang dune 3.4)
 
-(name challenge)
+(name dist-sys-challenge)
 
 (generate_opam_files true)
 
 (source
- (github username/reponame))
+ (github TheLortex/ocaml-maelstrom))
 
-(authors "Author Name")
+(authors "Lucas Pluvinage")
 
-(maintainers "Maintainer Name")
+(maintainers "Lucas Pluvinage")
 
-(license LICENSE)
-
-(documentation https://url/to/documentation)
+(license MIT)
 
 (package
- (name challenge)
- (synopsis "A short synopsis")
- (description "A longer description")
- (depends ocaml dune)
- (tags
-  (topics "to describe" your project)))
-
-; See the complete stanza docs at https://dune.readthedocs.io/en/stable/dune-files.html#dune-project
+ (name dist-sys-challenge)
+ (synopsis "Solutions and a helper library for the Fly.io challenges")
+ (depends ocaml dune eio yojson ppx_deriving_yojson fmt eio_main))

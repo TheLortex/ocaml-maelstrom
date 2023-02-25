@@ -29,7 +29,5 @@ let () =
   in
   with_handler ms "generate"
     (fun msg ->
-      Ok
-        (MessageBody.make ~type':"generate_ok"
-           (`Assoc [ ("id", `Int (generate ())) ])))
+      Ok (MessageBody.make ~type':"generate_ok" [ ("id", `Int (generate ())) ]))
     (fun () -> wait_eof ms)
