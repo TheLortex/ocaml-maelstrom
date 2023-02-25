@@ -267,8 +267,10 @@ let with_init ~stdin ~stdout fn =
   Eio.Fiber.first
     (fun () -> fn state)
     (fun () ->
+      Eio.Switch.run @@ fun sw ->
       while true do
-        handle_incoming_message ~state (read ~stdin)
+        let message =read ~stdin in
+        Eio.Fiber.fork ~sw (fun () -> handle_incoming_message ~state message)
       done;
       failwith "unreachable")
 
