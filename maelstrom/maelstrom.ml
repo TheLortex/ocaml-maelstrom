@@ -46,8 +46,6 @@ module ErrorBodyWire = struct
 
   let of_json t = of_yojson t |> or_fail
   let in_reply_to t = t.in_reply_to
-  let kind t = t.kind
-  let text t = t.text
   let make ~in_reply_to { ErrorBody.kind; text } = { in_reply_to; kind; text }
   let to_body t = ErrorBody.make t.kind t.text
 end
@@ -137,17 +135,13 @@ type t = {
 }
 
 module Message = struct
-  type init = t
-
   type t = { src : string; dest : string; body : Yojson.Safe.t }
   [@@deriving yojson { strict = false }]
 
   let of_json t = of_yojson t |> or_fail
   let to_json = to_yojson
   let make_raw ~init dest body = { src = init.Init.node_id; dest; body }
-  let make ~ms dest body = { src = ms.init.node_id; dest; body }
   let body t = t.body
-  let dest t = t.dest
   let src t = t.src
 end
 

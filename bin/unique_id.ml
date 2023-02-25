@@ -28,6 +28,6 @@ let () =
     (!counter lsl offset) + worker_id
   in
   with_handler ms "generate"
-    (fun msg ->
+    (fun _ ->
       Ok (MessageBody.make ~type':"generate_ok" [ ("id", `Int (generate ())) ]))
     (fun () -> wait_eof ms)

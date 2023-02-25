@@ -24,7 +24,7 @@ let broadcast_handler ~ms msg =
     List.iter (fun node -> rpc ms node gossip handler) !can_send_to);
   ack "broadcast_ok"
 
-let read_handler msg =
+let read_handler _ =
   Ok
     (MessageBody.make ~type':"read_ok"
        [
