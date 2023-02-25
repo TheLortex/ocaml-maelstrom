@@ -278,7 +278,8 @@ let with_init ~stdin ~stdout fn =
             | None -> (
                 match
                   Hashtbl.find_opt state.callbacks
-                    (MessageBodyWire.msg_id res |> Option.value ~default:(-1))
+                    (MessageBodyWire.in_reply_to res
+                    |> Option.value ~default:(-1))
                 with
                 | None -> Eio.traceln "WARNING: unhandled message"
                 | Some cb -> cb (Ok (MessageBodyWire.to_body res))))
