@@ -16,22 +16,20 @@ let () =
   Eio_main.run @@ fun env ->
   with_init ~stdout:env#stdout ~stdin:env#stdin @@ fun ms ->
   Eio.traceln "init!";
-  let worker_id = node_id_to_int (node_id ms) in
+  let worker_id = node_id_to_int (node ms |> id_of_node) in
   let max_worker_id =
-    node_ids ms |> List.map node_id_to_int |> List.fold_left max 0
+    nodes ms
+    |> List.map (fun v -> node_id_to_int (id_of_node v))
+    |> List.fold_left max 0
   in
   let offset = find_ofs max_worker_id + 1 in
   let generate () =
     incr counter;
     (!counter lsl offset) + worker_id
   in
-
-  while true do
-    respond_with ms @@ fun _ msg ->
-    assert (MessageBody.type' msg = "generate");
-    let response =
-      MessageBody.reply msg ~type':"generate_ok"
-        (`Assoc [ ("id", `Int (generate ())) ])
-    in
-    (Ok response, ())
-  done
+  with_handler ms "generate"
+    (fun msg ->
+      Ok
+        (MessageBody.make ~type':"generate_ok"
+           (`Assoc [ ("id", `Int (generate ())) ])))
+    (fun () -> wait_eof ms)
